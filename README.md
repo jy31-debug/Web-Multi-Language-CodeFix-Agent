@@ -1,4 +1,4 @@
-Web Multi-Language CodeFix Agent
+\# Web Multi-Language CodeFix Agent
 
 
 
@@ -10,7 +10,7 @@ This project allows users to upload a single source code file or a zip project, 
 
 
 
-Why this project exists
+\## Why this project exists
 
 
 
@@ -22,11 +22,11 @@ This project is designed for a more realistic use case:
 
 
 
-A user uploads one buggy file and asks the agent to fix it.
+\- A user uploads one buggy file and asks the agent to fix it.
 
-A user uploads a zip project with tests and provides a command such as pytest.
+\- A user uploads a zip project with tests and provides a command such as `pytest`.
 
-A user uploads a zip project without tests and asks the agent to inspect and repair the source files.
+\- A user uploads a zip project without tests and asks the agent to inspect and repair the source files.
 
 
 
@@ -34,43 +34,49 @@ The goal is to build a practical CodeFix Agent workflow instead of a simple one-
 
 
 
-Main Features
-
-FastAPI web interface
-
-Single source file repair
-
-Zip project upload
-
-Static project repair without test scripts
-
-Python pytest-based test-driven repair
-
-Multi-round repair loop
-
-Skill Router for automatic task routing
-
-LangGraph workflow orchestration
-
-LangChain and LLM-based patch generation
-
-Multi-language adapter design
-
-Fixed code, diff, and repair report generation
-
-Fixed project zip download
-
-Sandbox runner prototype
-
-MCP tool server prototype
-
-Task Routes
-
-Single File Repair
+\## Main Features
 
 
 
-When the user uploads one source file and leaves the test command empty, the system routes the task to SingleFileFixSkill.
+\- FastAPI web interface
+
+\- Single source file repair
+
+\- Zip project upload
+
+\- Static project repair without test scripts
+
+\- Python pytest-based test-driven repair
+
+\- Multi-round repair loop
+
+\- Skill Router for automatic task routing
+
+\- LangGraph workflow orchestration
+
+\- LangChain and LLM-based patch generation
+
+\- Multi-language adapter design
+
+\- Fixed code, diff, and repair report generation
+
+\- Fixed project zip download
+
+\- Sandbox runner prototype
+
+\- MCP tool server prototype
+
+
+
+\## Task Routes
+
+
+
+\### Single File Repair
+
+
+
+When the user uploads one source file and leaves the test command empty, the system routes the task to `SingleFileFixSkill`.
 
 
 
@@ -82,15 +88,15 @@ Example user request:
 
 
 
-Fix the add function. It should return the sum of a and b.
+`Fix the add function. It should return the sum of a and b.`
 
 
 
-Python Test-Driven Project Repair
+\### Python Test-Driven Project Repair
 
 
 
-When the user uploads a zip project and provides a pytest command, the system routes the task to PythonTestFixSkill.
+When the user uploads a zip project and provides a pytest command, the system routes the task to `PythonTestFixSkill`.
 
 
 
@@ -98,19 +104,19 @@ Example test command:
 
 
 
-pytest
+`pytest`
 
 
 
-This skill runs the tests, reads the failure logs, locates the source file, generates a patch, writes the fixed code, and reruns tests. It supports multiple repair rounds until tests pass or the repair limit is reached.
+This skill runs the tests, reads failure logs, repairs the source code, and can perform multiple repair rounds until tests pass or the repair limit is reached.
 
 
 
-Static Project Repair
+\### Static Project Repair
 
 
 
-When the user uploads a zip project but does not provide a test command, the system routes the task to ProjectStaticFixSkill.
+When the user uploads a zip project but does not provide a test command, the system routes the task to `ProjectStaticFixSkill`.
 
 
 
@@ -122,61 +128,89 @@ This route is useful when the uploaded project has no test scripts.
 
 
 
-Project Structure
+\## Project Structure
 
-adapters/
 
-Multi-language adapter modules.
 
-skills/
+\- `adapters/`  
 
-Code repair skills, including single-file repair, static project repair, and Python test-driven repair.
+&#x20; Multi-language adapter modules.
 
-templates/
 
-FastAPI HTML frontend template.
 
-agent\_graph.py
+\- `skills/`  
 
-LangGraph workflow definition.
+&#x20; Code repair skills, including single-file repair, static project repair, and Python test-driven repair.
 
-skill\_router.py
 
-Routes tasks to different repair skills.
 
-language\_detector.py
+\- `templates/`  
 
-Detects source code language.
+&#x20; FastAPI HTML frontend template.
 
-memory\_manager.py
 
-Stores short-term and episodic task memory.
 
-task\_manager.py
+\- `agent\_graph.py`  
 
-Manages uploaded files, workspaces, outputs, reports, and error logs.
+&#x20; LangGraph workflow definition.
 
-llm\_patch\_generator.py
 
-Calls the LLM to generate code patches.
 
-web\_app.py
+\- `skill\_router.py`  
 
-FastAPI web application entry point.
+&#x20; Routes tasks to different repair skills.
 
-sandbox\_runner.py
 
-Sandbox command runner prototype.
 
-mcp\_server.py
+\- `language\_detector.py`  
 
-MCP tool server prototype.
+&#x20; Detects source code language.
 
-Dockerfile and docker-compose.yml
 
-Deployment prototype files.
 
-Local Installation
+\- `memory\_manager.py`  
+
+&#x20; Stores short-term and episodic task memory.
+
+
+
+\- `task\_manager.py`  
+
+&#x20; Manages uploaded files, workspaces, outputs, reports, and error logs.
+
+
+
+\- `llm\_patch\_generator.py`  
+
+&#x20; Calls the LLM to generate code patches.
+
+
+
+\- `web\_app.py`  
+
+&#x20; FastAPI web application entry point.
+
+
+
+\- `sandbox\_runner.py`  
+
+&#x20; Sandbox command runner prototype.
+
+
+
+\- `mcp\_server.py`  
+
+&#x20; MCP tool server prototype.
+
+
+
+\- `Dockerfile` and `docker-compose.yml`  
+
+&#x20; Deployment prototype files.
+
+
+
+\## Local Installation
 
 
 
@@ -184,7 +218,7 @@ Install dependencies:
 
 
 
-pip install -r requirements.txt
+`pip install -r requirements.txt`
 
 
 
@@ -192,7 +226,7 @@ Run the web app:
 
 
 
-uvicorn web\_app:app --host 127.0.0.1 --port 8000
+`uvicorn web\_app:app --host 127.0.0.1 --port 8000`
 
 
 
@@ -200,7 +234,7 @@ Or on Windows:
 
 
 
-run\_web.bat
+`run\_web.bat`
 
 
 
@@ -208,11 +242,11 @@ Then open:
 
 
 
-http://127.0.0.1:8000
+`http://127.0.0.1:8000`
 
 
 
-Environment Variables
+\## Environment Variables
 
 
 
@@ -224,15 +258,15 @@ Example:
 
 
 
-DEEPSEEK\_API\_KEY=your\_api\_key\_here
+`DEEPSEEK\_API\_KEY=your\_api\_key\_here`
 
 
 
-Do not upload .env files.
+Do not upload `.env` files.
 
 
 
-Current Status
+\## Current Status
 
 
 
@@ -244,39 +278,47 @@ The current version focuses on the complete product loop:
 
 
 
-Upload code → Route skill → Run repair → Generate diff and report → Download fixed result
+`Upload code → Route skill → Run repair → Generate diff and report → Download fixed result`
 
 
 
-Tech Stack
+\## Tech Stack
 
-Python
 
-FastAPI
 
-LangGraph
+\- Python
 
-LangChain
+\- FastAPI
 
-LLM API
+\- LangGraph
 
-Pytest
+\- LangChain
 
-Docker prototype
+\- LLM API
 
-MCP tool server prototype
+\- Pytest
 
-Future Work
+\- Docker prototype
 
-Improve cross-file reasoning
+\- MCP tool server prototype
 
-Add stronger language-specific repair skills
 
-Improve frontend interaction
 
-Add safer sandbox isolation
+\## Future Work
 
-Add project-level dependency analysis
 
-Add richer evaluation examples
+
+\- Improve cross-file reasoning
+
+\- Add stronger language-specific repair skills
+
+\- Improve frontend interaction
+
+\- Add safer sandbox isolation
+
+\- Add project-level dependency analysis
+
+\- Add richer evaluation examples
+
+
 
