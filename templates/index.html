@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Web Multi-Language CodeFix Agent</title>
+    <style>
+        body {
+            font-family: "Microsoft YaHei", Arial, sans-serif;
+            background: linear-gradient(135deg, #eef4ff 0%, #f8fafc 45%, #eef9ff 100%);
+            margin: 0;
+            padding: 0;
+            color: #1e293b;
+        }
+
+        .container {
+            width: 980px;
+            margin: 36px auto;
+        }
+
+        .hero {
+            background: linear-gradient(135deg, #2563eb, #0ea5e9);
+            color: white;
+            padding: 34px;
+            border-radius: 20px;
+            box-shadow: 0 18px 40px rgba(37, 99, 235, 0.22);
+            margin-bottom: 24px;
+        }
+
+        .hero h1 {
+            margin: 0 0 12px 0;
+            font-size: 30px;
+        }
+
+        .hero p {
+            margin: 0;
+            line-height: 1.8;
+            font-size: 15px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1.1fr 0.9fr;
+            gap: 22px;
+            align-items: start;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.96);
+            padding: 28px;
+            border-radius: 18px;
+            box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+            margin-bottom: 24px;
+            border: 1px solid #e2e8f0;
+        }
+
+        h2 {
+            color: #0f172a;
+            border-left: 5px solid #3b82f6;
+            padding-left: 12px;
+            margin-top: 0;
+        }
+
+        h3 {
+            margin-top: 18px;
+            color: #1e40af;
+        }
+
+        label {
+            font-weight: bold;
+            display: block;
+            margin-top: 18px;
+            margin-bottom: 8px;
+        }
+
+        input[type="file"],
+        input[type="text"],
+        select,
+        textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #cbd5e1;
+            border-radius: 10px;
+            box-sizing: border-box;
+            font-size: 14px;
+            background: #ffffff;
+        }
+
+        textarea {
+            min-height: 120px;
+            resize: vertical;
+        }
+
+        button {
+            margin-top: 22px;
+            padding: 13px 24px;
+            border: none;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #2563eb, #0ea5e9);
+            color: white;
+            font-size: 15px;
+            font-weight: bold;
+            cursor: pointer;
+            width: 100%;
+            box-shadow: 0 10px 22px rgba(37, 99, 235, 0.2);
+        }
+
+        button:hover {
+            background: linear-gradient(135deg, #1d4ed8, #0284c7);
+        }
+
+        .tip-box {
+            background: #f8fafc;
+            border: 1px solid #dbeafe;
+            border-left: 5px solid #60a5fa;
+            padding: 14px 16px;
+            border-radius: 12px;
+            margin-top: 12px;
+            line-height: 1.8;
+            font-size: 13px;
+        }
+
+        .tip-box code {
+            background: #e0f2fe;
+            padding: 2px 6px;
+            border-radius: 5px;
+            color: #075985;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 9px;
+            margin: 4px 5px 4px 0;
+            background: #dbeafe;
+            color: #1d4ed8;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .item {
+            margin: 9px 0;
+        }
+
+        .label {
+            font-weight: bold;
+            color: #334155;
+        }
+
+        pre {
+            background: #0f172a;
+            color: #e5e7eb;
+            padding: 16px;
+            border-radius: 12px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            line-height: 1.5;
+            font-size: 13px;
+        }
+
+        .success {
+            color: #15803d;
+            font-weight: bold;
+        }
+
+        .warning {
+            color: #b45309;
+            font-weight: bold;
+        }
+
+        .download a {
+            display: inline-block;
+            margin-right: 12px;
+            margin-top: 10px;
+            padding: 9px 13px;
+            border-radius: 9px;
+            background: #eff6ff;
+            color: #2563eb;
+            text-decoration: none;
+            font-weight: bold;
+            border: 1px solid #bfdbfe;
+        }
+
+        .download a:hover {
+            background: #dbeafe;
+        }
+
+        .small {
+            font-size: 13px;
+            color: #64748b;
+            word-break: break-all;
+        }
+
+        .route-list {
+            padding-left: 18px;
+            line-height: 1.9;
+            font-size: 14px;
+        }
+
+        .footer-note {
+            font-size: 12px;
+            color: #64748b;
+            margin-top: 14px;
+            line-height: 1.7;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="hero">
+        <h1>Web Multi-Language CodeFix Agent</h1>
+        <p>
+            上传单个代码文件或 zip 项目压缩包，输入一句自然语言需求，Agent 会自动识别语言、选择修复路线、调用 LLM 生成修复代码、Diff 和报告。
+        </p>
+    </div>
+
+    <div class="grid">
+        <div class="card">
+            <h2>提交修复任务</h2>
+
+            <form action="/run-agent" method="post" enctype="multipart/form-data">
+                <label>上传代码文件或项目 zip</label>
+                <input type="file" name="uploaded_file" required>
+
+                <div class="tip-box">
+                    <b>支持两种上传方式：</b><br>
+                    1. 单个代码文件：例如 <code>buggy_add.py</code>、<code>Main.java</code>、<code>main.c</code><br>
+                    2. 项目压缩包：例如 <code>project.zip</code>，里面可以包含多个源代码文件
+                </div>
+
+                <label>语言选择</label>
+                <select name="language_choice">
+                    <option value="auto">自动识别</option>
+                    <option value="python">Python</option>
+                    <option value="java">Java</option>
+                    <option value="c">C</option>
+                    <option value="cpp">C++</option>
+                    <option value="javascript">JavaScript</option>
+                    <option value="typescript">TypeScript</option>
+                </select>
+
+                <label>用户修复需求</label>
+                <textarea name="user_requirement" placeholder="例如：帮我看看这个代码哪里错了，并修复。"></textarea>
+
+                <label>测试命令（可选，高级用户填写）</label>
+                <input type="text" name="test_command" placeholder="不懂可以留空；Python 测试项目常用 pytest">
+
+                <div class="tip-box">
+                    <b>测试命令怎么填？</b><br>
+                    不懂可以留空，Agent 会走静态项目修复路线。<br>
+                    Python 项目常用：<code>pytest</code><br>
+                    Java Maven 项目常用：<code>mvn test</code><br>
+                    Java 单文件常用：<code>javac Main.java</code><br>
+                    C 项目常用：<code>gcc main.c -o main.exe</code><br>
+                    JavaScript 项目常用：<code>npm test</code> 或 <code>node main.js</code>
+                </div>
+
+                <button type="submit">开始运行 CodeFix Agent</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h2>Agent 路线</h2>
+
+            <h3>路线 1：单文件修复</h3>
+            <ul class="route-list">
+                <li>上传一个代码文件</li>
+                <li>测试命令留空</li>
+                <li>走 SingleFileFixSkill</li>
+            </ul>
+
+            <h3>路线 2：测试驱动项目修复</h3>
+            <ul class="route-list">
+                <li>上传 zip 项目</li>
+                <li>填写测试命令，例如 pytest</li>
+                <li>走 PythonTestFixSkill</li>
+            </ul>
+
+            <h3>路线 3：无测试脚本项目修复</h3>
+            <ul class="route-list">
+                <li>上传 zip 项目</li>
+                <li>测试命令留空</li>
+                <li>走 ProjectStaticFixSkill</li>
+                <li>多个修复文件会打包成 zip 下载</li>
+            </ul>
+
+            <div>
+                <span class="badge">FastAPI</span>
+                <span class="badge">LangGraph</span>
+                <span class="badge">Skill Router</span>
+                <span class="badge">LangChain</span>
+                <span class="badge">DeepSeek</span>
+                <span class="badge">Sandbox</span>
+            </div>
+
+            <p class="footer-note">
+                当前是 MVP 版本：优先保证上传、路由、修复、报告、下载闭环跑通。
+            </p>
+        </div>
+    </div>
+
+    {% if result %}
+    <div class="card">
+        <h2>运行结果</h2>
+
+        <div class="item"><span class="label">Task ID：</span>{{ result.task_id }}</div>
+        <div class="item"><span class="label">上传类型：</span>{{ result.upload_type }}</div>
+        <div class="item"><span class="label">识别语言：</span>{{ result.language }}</div>
+        <div class="item"><span class="label">Memory Backend：</span>{{ result.memory_backend }}</div>
+        <div class="item"><span class="label">测试命令：</span>{{ result.test_command }}</div>
+
+        <div class="item small"><span class="label">上传文件：</span>{{ result.uploaded_file }}</div>
+
+        {% if result.project_path %}
+        <div class="item small"><span class="label">项目路径：</span>{{ result.project_path }}</div>
+        {% endif %}
+
+        {% if result.skill_decision %}
+        <h2>Skill Router</h2>
+        <div class="item"><span class="label">Selected Skill：</span>{{ result.skill_decision.skill_name }}</div>
+        <div class="item"><span class="label">Reason：</span>{{ result.skill_decision.reason }}</div>
+        <div class="item"><span class="label">Confidence：</span>{{ result.skill_decision.confidence }}</div>
+        {% endif %}
+
+        <h2>Final Message</h2>
+        <pre>{{ result.final_message }}</pre>
+
+        {% if result.skill_result %}
+        <h2>Skill Result</h2>
+        <div class="item">
+            <span class="label">Success：</span>
+            {% if result.skill_result.success %}
+                <span class="success">True</span>
+            {% else %}
+                <span class="warning">False</span>
+            {% endif %}
+        </div>
+        <div class="item"><span class="label">Message：</span>{{ result.skill_result.message }}</div>
+        {% endif %}
+
+        {% if result.diff %}
+        <h2>Diff</h2>
+        <pre>{{ result.diff }}</pre>
+        {% endif %}
+
+        <h2>下载结果</h2>
+        <div class="download">
+            {% if result.fixed_file_exists %}
+                <a href="/download?path={{ result.fixed_file_path }}">下载修复后代码</a>
+            {% endif %}
+
+            {% if result.fixed_zip_exists %}
+                <a href="/download?path={{ result.fixed_zip_path }}">下载全部修复文件 zip</a>
+            {% endif %}
+
+            {% if result.report_exists %}
+                <a href="/download?path={{ result.report_path }}">下载修复报告</a>
+            {% endif %}
+
+            {% if result.error_log_exists %}
+                <a href="/download?path={{ result.error_log_path }}">下载错误日志</a>
+            {% endif %}
+
+            {% if not result.fixed_file_exists and not result.fixed_zip_exists and not result.report_exists and not result.error_log_exists %}
+                <span class="warning">当前没有可下载文件。</span>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+</body>
+</html>

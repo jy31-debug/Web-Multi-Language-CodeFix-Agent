@@ -1,0 +1,52 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment
+.env
+.venv/
+venv/
+env/
+envs/
+.conda/
+
+# Runtime outputs
+workspaces/
+outputs/
+reports/
+error_logs/
+traces/
+uploaded/
+project/
+fixed_project_files/
+*.log
+
+# Test/demo data
+demo_inputs/
+demo_zip_project/
+demo_zip_project.zip
+demo_order_project/
+demo_order_project.zip
+demo_bank_project/
+demo_bank_project.zip
+benchmarks/
+QuixBugs/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large or generated files
+*.zip
+*.tar
+*.gz
+
+# Secrets
+*.key
+*.pem
