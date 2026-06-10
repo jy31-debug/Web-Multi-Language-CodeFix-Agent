@@ -59,25 +59,50 @@ This skill runs the tests, reads failure logs, repairs the source code, and can 
 
 When the user uploads a zip project but does not provide a test command, the system routes the task to `ProjectStaticFixSkill`.
 
-This skill scans source code files, skips test files, generates repaired versions, and packages the fixed files into a downloadable fixed project zip file.
+This skill scans source code files, skips test files, generates repaired versions, and packages the fixed files into a downloadable zip file.
 
 This route is useful when the uploaded project has no test scripts.
 
 ## Project Structure
 
-- `adapters/`: Multi-language adapter modules.
-- `skills/`: Code repair skills, including single-file repair, static project repair, and Python test-driven repair.
-- `templates/`: FastAPI HTML frontend template.
-- `agent_graph.py`: LangGraph workflow definition.
-- `skill_router.py`: Routes tasks to different repair skills.
-- `language_detector.py`: Detects source code language.
-- `memory_manager.py`: Stores short-term and episodic task memory.
-- `task_manager.py`: Manages uploaded files, workspaces, outputs, reports, and error logs.
-- `llm_patch_generator.py`: Calls the LLM to generate code patches.
-- `web_app.py`: FastAPI web application entry point.
-- `sandbox_runner.py`: Sandbox command runner prototype.
-- `mcp_server.py`: MCP tool server prototype.
-- `Dockerfile` and `docker-compose.yml`: Deployment prototype files.
+- `adapters/`  
+  Multi-language adapter modules.
+
+- `skills/`  
+  Code repair skills, including single-file repair, static project repair, and Python test-driven repair.
+
+- `templates/`  
+  FastAPI HTML frontend template.
+
+- `agent_graph.py`  
+  LangGraph workflow definition.
+
+- `skill_router.py`  
+  Routes tasks to different repair skills.
+
+- `language_detector.py`  
+  Detects source code language.
+
+- `memory_manager.py`  
+  Stores short-term and episodic task memory.
+
+- `task_manager.py`  
+  Manages uploaded files, workspaces, outputs, reports, and error logs.
+
+- `llm_patch_generator.py`  
+  Calls the LLM to generate code patches.
+
+- `web_app.py`  
+  FastAPI web application entry point.
+
+- `sandbox_runner.py`  
+  Sandbox command runner prototype.
+
+- `mcp_server.py`  
+  MCP tool server prototype.
+
+- `Dockerfile` and `docker-compose.yml`  
+  Deployment prototype files.
 
 ## Local Installation
 
