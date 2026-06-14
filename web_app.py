@@ -1,13 +1,13 @@
-from pathlib import Path
-import shutil
-import sys
+from pathlib import Path #Python 自带的路径处理模块，专门处理文件路径文件夹路径、文件名、扩展名、父目录、文件是否存在
+import shutil #主要负责高级文件操作，如复制、移动、删除文件和目录
+import sys #用于访问 Python 解释器和运行环境
 
 from fastapi import FastAPI, File, Form, UploadFile, Request
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent #获取当前文件的绝对路径，并返回其父目录的路径，作为项目的基础目录
 
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
@@ -22,7 +22,7 @@ app = FastAPI(title="Web Multi-Language CodeFix Agent")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/", response_class=HTMLResponse)  #通过路由访问根路径（/）时，返回HTML响应
 async def index(request: Request):
     return templates.TemplateResponse(
         request,
@@ -71,23 +71,23 @@ async def run_agent(
                 },
             )
 
-        project_path = zip_result["project_dir"]
-        source_file_path = ""
+        project_path = zip_result["project_dir"]  #解压后的项目路径
+        source_file_path = ""    #单个文件路径为空
 
         if language_choice == "auto":
             if "pytest" in test_command.lower():
                 detected_language = "python"
             else:
-                detected_language = detect_main_language(project_path)
+                detected_language = detect_main_language(project_path)  #检测项目的主要编程语言
         else:
             detected_language = language_choice
 
     else:
-        project_path = ""
-        source_file_path = str(saved_file_path)
+        project_path = ""   #单文件上传时，项目路径为空
+        source_file_path = str(saved_file_path)   #单文件上传时，源文件路径就是上传的文件路径
 
         if language_choice == "auto":
-            detected_language = detect_language_from_file(str(saved_file_path))
+            detected_language = detect_language_from_file(str(saved_file_path))  #检测上传文件的编程语言
         else:
             detected_language = language_choice
 
@@ -101,26 +101,26 @@ async def run_agent(
 
     result = run_agent_graph(initial_state)
 
-    skill_result = result.get("skill_result", {})
+    skill_result = result.get("skill_result", {}) #从运行结果中获取技能执行结果，默认为空字典
 
-    if hasattr(skill_result, "data"):
+    if hasattr(skill_result, "data"): #如果技能结果是一个对象，并且具有data属性，则从中提取数据、成功状态和消息
         skill_data = skill_result.data
         skill_success = skill_result.success
         skill_message = skill_result.message
-    elif isinstance(skill_result, dict):
+    elif isinstance(skill_result, dict):  #如果技能结果是一个字典，则从中提取数据、成功状态和消息
         skill_data = skill_result.get("data", {})
         skill_success = skill_result.get("success")
         skill_message = skill_result.get("message", "")
-    else:
+    else:  #如果技能结果既不是对象也不是字典，则将整个结果作为数据，并假设成功状态未知，消息为空
         skill_data = {}
         skill_success = False
         skill_message = ""
 
-    report_path = skill_data.get("report_path", "")
-    fixed_file_path = skill_data.get("fixed_file_path", "")
-    fixed_zip_path = skill_data.get("fixed_zip_path", "")
-    error_log_path = skill_data.get("error_log_path", "")
-    diff_text = skill_data.get("diff", "")
+    report_path = skill_data.get("report_path", "") #从技能数据中提取报告路径、修复后文件路径、修复后压缩包路径、错误日志路径和差异文本，默认为空字符串
+    fixed_file_path = skill_data.get("fixed_file_path", "") #从技能数据中提取修复后文件路径，默认为空字符串
+    fixed_zip_path = skill_data.get("fixed_zip_path", "") #从技能数据中提取修复后压缩包路径，默认为空字符串
+    error_log_path = skill_data.get("error_log_path", "") #从技能数据中提取错误日志路径，默认为空字符串
+    diff_text = skill_data.get("diff", "") #从技能数据中提取差异文本，默认为空字符串
 
     page_result = {
         "task_id": task_info["task_id"],
@@ -130,7 +130,7 @@ async def run_agent(
         "language": result.get("language", detected_language),
         "test_command": test_command,
         "skill_decision": result.get("skill_decision", {}),
-        "memory_backend": result.get("memory_backend", ""),
+        "memory_backend": result.get("memory_backend", ""), #从运行结果中提取内存后端信息，默认为空字符串
         "final_message": result.get("final_message", ""),
         "skill_result": {
             "success": skill_success,
@@ -199,10 +199,14 @@ def self_error_result(
     }
 
 
+'''
+启动提示。
+直接 python web_app.py 时，它会告诉你应该用 uvicorn 启动；
+真正运行网页的是 uvicorn web_app:app。
+'''
 def main():
     print("Run this app with:")
-    print("uvicorn agent_harness_projects.codefix_agent.web_app:app --host 127.0.0.1 --port 8000")
-
+    print("python -m uvicorn web_app:app --host 127.0.0.1 --port 8000")
 
 if __name__ == "__main__":
     main()

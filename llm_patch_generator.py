@@ -33,8 +33,8 @@ def build_patch_prompt():
     return ChatPromptTemplate.from_messages(
         [
             (
-    "system",
-    """
+                "system",
+                """
 You are a careful CodeFix Agent.
 
 Your task is to repair buggy code based on:
@@ -42,19 +42,24 @@ Your task is to repair buggy code based on:
 2. the programming language,
 3. the original source code,
 4. optional error or test information,
-5. optional retrieved context.
+5. optional retrieved context,
+6. optional historical repair memory.
 
-Rules:
+Important rules:
 - Return the full fixed code, not only a fragment.
 - Do not add markdown code fences.
 - Keep the original code style as much as possible.
 - Do not invent files that are not provided.
 - If the input is a single file, return only the fixed content of that file.
+- Do not modify tests unless the user explicitly asks you to.
+- The current source code and current error/test information are the main evidence.
+- If retrieved context contains historical repair memories, use them only as reference.
+- Do not blindly copy old fixes from memory. Apply them only if they match the current bug.
 - If the user's requirement is written in Chinese, write ERROR_CAUSE and FIX_SUMMARY in Chinese.
 - If the user's requirement is written in English, write ERROR_CAUSE and FIX_SUMMARY in English.
 - The code itself must remain valid code in the target programming language.
 
-Output format:
+Output format must be exactly:
 
 ERROR_CAUSE:
 <brief explanation in the same language as the user requirement>
@@ -65,7 +70,7 @@ FIX_SUMMARY:
 FIXED_CODE:
 <full fixed code>
 """,
-),
+            ),
             (
                 "human",
                 """
@@ -81,7 +86,7 @@ Original source code:
 Error or test information:
 {error_info}
 
-Retrieved context:
+Retrieved context / historical memory:
 {retrieved_context}
 """,
             ),
@@ -111,24 +116,40 @@ def fallback_generate_patch(
 
 
 def parse_llm_output(raw_output: str) -> dict:
+    """
+    Parse LLM output into:
+    - error_cause
+    - fix_summary
+    - fixed_code
+
+    The model is asked to follow a strict text format.
+    If it does not, this function falls back safely.
+    """
     error_cause = ""
     fix_summary = ""
     fixed_code = ""
 
-    if "ERROR_CAUSE:" in raw_output and "FIX_SUMMARY:" in raw_output and "FIXED_CODE:" in raw_output:
+    if (
+        "ERROR_CAUSE:" in raw_output
+        and "FIX_SUMMARY:" in raw_output
+        and "FIXED_CODE:" in raw_output
+    ):
         try:
             after_error = raw_output.split("ERROR_CAUSE:", 1)[1]
             error_cause, after_summary_marker = after_error.split("FIX_SUMMARY:", 1)
             fix_summary, fixed_code = after_summary_marker.split("FIXED_CODE:", 1)
+
+            fixed_code = fixed_code.strip()
 
             return {
                 "success": True,
                 "mode": "llm",
                 "error_cause": error_cause.strip(),
                 "fix_summary": fix_summary.strip(),
-                "fixed_code": fixed_code.strip(),
+                "fixed_code": fixed_code,
                 "raw_output": raw_output,
             }
+
         except ValueError:
             pass
 
@@ -152,8 +173,15 @@ def generate_patch(
     """
     Generate a repaired version of the source code using LangChain + DeepSeek.
 
-    If the LLM API call fails because of network or SSL issues, the function
-    returns a safe fallback result instead of crashing the whole Agent workflow.
+    Main inputs:
+    - user_requirement: what the user wants to fix
+    - language: programming language
+    - source_code: current buggy code
+    - error_info: test error / runtime error / repair context
+    - retrieved_context: historical memory or retrieved context
+
+    If the LLM API call fails, return a safe fallback result
+    instead of crashing the whole Agent workflow.
     """
     llm = get_deepseek_llm()
 
@@ -192,21 +220,28 @@ def generate_patch(
             "raw_output": str(exc),
         }
 
+
 def main():
-    print("=== Day 19 LLM Patch Generator Test ===")
+    print("=== LLM Patch Generator Test ===")
 
     source_code = """def add(a, b):
     return a - b
 """
 
-    user_requirement = "Fix this function. It should return the sum of a and b."
+    user_requirement = "修复 add 函数，它应该返回 a 和 b 的和。"
 
     result = generate_patch(
         user_requirement=user_requirement,
         language="python",
         source_code=source_code,
-        error_info="The function returns subtraction instead of addition.",
-        retrieved_context="This is a simple arithmetic function.",
+        error_info="测试失败：add(1, 2) 应该返回 3，但当前代码返回 -1。",
+        retrieved_context=(
+            "Historical repair memory:\n"
+            "Previous Fix Summary: Changed subtraction to addition in an add function.\n"
+            "Previous Diff Preview:\n"
+            "- return a - b\n"
+            "+ return a + b\n"
+        ),
     )
 
     print("success:", result["success"])

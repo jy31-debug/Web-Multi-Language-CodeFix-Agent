@@ -1,9 +1,5 @@
 from pathlib import Path
-import difflib
-import inspect
-import os
 import re
-import subprocess
 import sys
 
 
@@ -18,11 +14,16 @@ if str(CODEFIX_DIR) not in sys.path:
 
 from base_skill import BaseFixSkill, SkillResult
 from task_manager import create_task, get_report_path, get_output_path, get_error_log_path
-from llm_patch_generator import generate_patch
+from memory_manager import MemoryManager
+from mcp_server import MCPToolServer
 
 
 class PythonTestFixSkill(BaseFixSkill):
     name = "PythonTestFixSkill"
+
+    def __init__(self):
+        self.memory = MemoryManager()
+        self.tools = MCPToolServer()
 
     def run(self, task_state: dict) -> SkillResult:
         project_path = task_state.get("project_path", "")
@@ -30,8 +31,21 @@ class PythonTestFixSkill(BaseFixSkill):
         user_requirement = task_state.get("user_requirement", "")
 
         task_info = create_task()
+        task_id = task_info["task_id"]
+
         report_path = get_report_path(task_info, "python_test_fix_report.md")
         error_log_path = get_error_log_path(task_info, "python_test_error_log.txt")
+
+        self.memory.remember_short_term(
+            task_id,
+            {
+                "skill_name": self.name,
+                "stage": "start",
+                "project_path": project_path,
+                "test_command": test_command,
+                "user_requirement": user_requirement,
+            },
+        )
 
         if not project_path:
             return SkillResult(
@@ -73,6 +87,7 @@ class PythonTestFixSkill(BaseFixSkill):
         Path(error_log_path).write_text(current_error_log, encoding="utf-8")
 
         parsed_error = self._parse_error_log(current_error_log)
+
         source_file_path = self._locate_source_file(
             project_dir=project_dir,
             parsed_error=parsed_error,
@@ -94,12 +109,22 @@ class PythonTestFixSkill(BaseFixSkill):
             )
             Path(report_path).write_text(report, encoding="utf-8")
 
+            self.memory.remember_short_term(
+                task_id,
+                {
+                    "skill_name": self.name,
+                    "stage": "failed",
+                    "reason": "Could not locate source file to repair.",
+                    "parsed_error": parsed_error,
+                },
+            )
+
             return SkillResult(
                 success=False,
                 skill_name=self.name,
                 message="Could not locate source file to repair.",
                 data={
-                    "task_id": task_info["task_id"],
+                    "task_id": task_id,
                     "project_path": str(project_dir),
                     "test_command": test_command,
                     "error_log_path": error_log_path,
@@ -144,12 +169,26 @@ class PythonTestFixSkill(BaseFixSkill):
                     total_attempts=total_attempts,
                 )
 
+                memory_query = "\n".join(
+                    [
+                        user_requirement,
+                        parsed_error.get("error_type", ""),
+                        parsed_error.get("failed_test_name", ""),
+                        error_log_for_round,
+                    ]
+                )
+
+                retrieved_context = self.memory.build_retrieved_context(
+                    query=memory_query,
+                    top_k=3,
+                )
+
                 patch_result = self._call_generate_patch(
                     language="python",
                     source_code=current_code,
                     user_requirement=user_requirement,
                     error_context=round_context,
-                    retrieved_context="",
+                    retrieved_context=retrieved_context,
                 )
 
                 patch_success = bool(patch_result.get("success"))
@@ -164,6 +203,7 @@ class PythonTestFixSkill(BaseFixSkill):
                             "patch_mode": patch_mode,
                             "error_cause": patch_result.get("error_cause", ""),
                             "fix_summary": patch_result.get("fix_summary", ""),
+                            "retrieved_context_used": bool(retrieved_context),
                             "diff": "",
                             "test_result": final_test_result,
                             "note": "LLM patch failed. This attempt is not counted as an effective repair round.",
@@ -211,6 +251,34 @@ class PythonTestFixSkill(BaseFixSkill):
 
                 all_diff_parts.append(diff_text)
 
+                self.memory.remember_episodic(
+                    {
+                        "skill_name": self.name,
+                        "language": "python",
+                        "error_type": parsed_error.get("error_type", ""),
+                        "failed_test_name": parsed_error.get("failed_test_name", ""),
+                        "user_requirement": user_requirement,
+                        "error_log_preview": error_log_for_round[:2000],
+                        "fix_summary": patch_result.get("fix_summary", ""),
+                        "success": final_success,
+                        "source_file_path": str(source_file),
+                        "diff_preview": diff_text[:2000],
+                    }
+                )
+
+                self.memory.remember_short_term(
+                    task_id,
+                    {
+                        "skill_name": self.name,
+                        "stage": "repair_round_finished",
+                        "attempt": total_attempts,
+                        "llm_round": successful_llm_rounds,
+                        "final_success": final_success,
+                        "source_file_path": str(source_file),
+                        "fixed_file_path": fixed_file_path,
+                    },
+                )
+
                 rounds.append(
                     {
                         "attempt": total_attempts,
@@ -220,6 +288,8 @@ class PythonTestFixSkill(BaseFixSkill):
                         "patch_mode": patch_mode,
                         "error_cause": patch_result.get("error_cause", ""),
                         "fix_summary": patch_result.get("fix_summary", ""),
+                        "retrieved_context_used": bool(retrieved_context),
+                        "retrieved_context_preview": retrieved_context[:1500],
                         "diff": diff_text,
                         "test_result": final_test_result,
                         "note": "Effective repair round finished.",
@@ -243,12 +313,28 @@ class PythonTestFixSkill(BaseFixSkill):
 
         Path(report_path).write_text(report, encoding="utf-8")
 
+        self.memory.remember_short_term(
+            task_id,
+            {
+                "skill_name": self.name,
+                "stage": "finished",
+                "project_path": str(project_dir),
+                "test_command": test_command,
+                "source_file_path": str(source_file),
+                "fixed_file_path": fixed_file_path,
+                "report_path": report_path,
+                "error_log_path": error_log_path,
+                "final_success": final_success,
+                "round_count": len(rounds),
+            },
+        )
+
         return SkillResult(
             success=final_success,
             skill_name=self.name,
             message="Python test-driven repair finished.",
             data={
-                "task_id": task_info["task_id"],
+                "task_id": task_id,
                 "project_path": str(project_dir),
                 "test_command": test_command,
                 "initial_returncode": first_test_result.get("returncode"),
@@ -259,53 +345,25 @@ class PythonTestFixSkill(BaseFixSkill):
                 "error_log_path": error_log_path,
                 "report_path": report_path,
                 "diff": final_diff_text,
+                "memory_backend": self.memory.describe_backend(),
             },
         )
 
     def _run_test_command(self, command: str, cwd: Path) -> dict:
-        env = os.environ.copy()
+        result = self.tools.call_tool(
+            "run_command",
+            command=command,
+            workspace_path=str(cwd),
+            timeout=60,
+        )
 
-        old_pythonpath = env.get("PYTHONPATH", "")
-        cwd_str = str(cwd.resolve())
-
-        if old_pythonpath:
-            env["PYTHONPATH"] = cwd_str + os.pathsep + old_pythonpath
-        else:
-            env["PYTHONPATH"] = cwd_str
-
-        try:
-            completed = subprocess.run(
-                command,
-                cwd=str(cwd),
-                shell=True,
-                text=True,
-                capture_output=True,
-                timeout=60,
-                env=env,
-            )
-
-            return {
-                "success": completed.returncode == 0,
-                "returncode": completed.returncode,
-                "stdout": completed.stdout,
-                "stderr": completed.stderr,
-            }
-
-        except subprocess.TimeoutExpired as exc:
-            return {
-                "success": False,
-                "returncode": -1,
-                "stdout": exc.stdout or "",
-                "stderr": "Command timed out.",
-            }
-
-        except Exception as exc:
-            return {
-                "success": False,
-                "returncode": -1,
-                "stdout": "",
-                "stderr": str(exc),
-            }
+        return {
+            "success": result.get("success", False),
+            "returncode": result.get("returncode", -1),
+            "stdout": result.get("stdout", ""),
+            "stderr": result.get("stderr", result.get("error", "")),
+            "backend": result.get("backend", ""),
+        }
 
     def _combine_output(self, result: dict) -> str:
         return (result.get("stdout", "") or "") + "\n" + (result.get("stderr", "") or "")
@@ -452,37 +510,14 @@ class PythonTestFixSkill(BaseFixSkill):
         error_context: str,
         retrieved_context: str,
     ) -> dict:
-        signature = inspect.signature(generate_patch)
-        supported_params = set(signature.parameters.keys())
-
-        kwargs = {}
-
-        if "language" in supported_params:
-            kwargs["language"] = language
-
-        if "source_code" in supported_params:
-            kwargs["source_code"] = source_code
-
-        if "user_requirement" in supported_params:
-            kwargs["user_requirement"] = user_requirement
-
-        if "error_context" in supported_params:
-            kwargs["error_context"] = error_context
-        elif "error_log" in supported_params:
-            kwargs["error_log"] = error_context
-        elif "error_message" in supported_params:
-            kwargs["error_message"] = error_context
-        elif "test_error" in supported_params:
-            kwargs["test_error"] = error_context
-
-        if "retrieved_context" in supported_params:
-            kwargs["retrieved_context"] = retrieved_context
-        elif "context" in supported_params:
-            kwargs["context"] = retrieved_context
-        elif "repair_context" in supported_params:
-            kwargs["repair_context"] = retrieved_context
-
-        return generate_patch(**kwargs)
+        return self.tools.call_tool(
+            "generate_patch",
+            language=language,
+            source_code=source_code,
+            user_requirement=user_requirement,
+            error_context=error_context,
+            retrieved_context=retrieved_context,
+        )
 
     def _apply_test_failure_hints(self, current_code: str, error_log: str) -> str:
         fixed_code = current_code
@@ -544,17 +579,15 @@ class PythonTestFixSkill(BaseFixSkill):
         original_name: str,
         fixed_name: str,
     ) -> str:
-        original_text = self._ensure_trailing_newline(original_text)
-        fixed_text = self._ensure_trailing_newline(fixed_text)
-
-        diff = difflib.unified_diff(
-            original_text.splitlines(keepends=True),
-            fixed_text.splitlines(keepends=True),
-            fromfile=original_name,
-            tofile=fixed_name,
+        result = self.tools.call_tool(
+            "show_diff",
+            original_text=original_text,
+            fixed_text=fixed_text,
+            original_name=original_name,
+            fixed_name=fixed_name,
         )
 
-        return "".join(diff)
+        return result.get("diff", "")
 
     def _build_report(
         self,
@@ -584,6 +617,7 @@ class PythonTestFixSkill(BaseFixSkill):
             f"- Source File: {source_file_path}",
             f"- Fixed File: {fixed_file_path}",
             f"- Final Success: {final_success}",
+            f"- Memory Backend: {self.memory.describe_backend()}",
             "",
             "## Initial Test Result",
             "",
@@ -604,7 +638,14 @@ class PythonTestFixSkill(BaseFixSkill):
                     f"- LLM Round: {round_item.get('llm_round', '')}",
                     f"- Patch Success: {round_item.get('patch_success')}",
                     f"- Patch Mode: {round_item.get('patch_mode')}",
+                    f"- Retrieved Context Used: {round_item.get('retrieved_context_used')}",
                     f"- Note: {round_item.get('note')}",
+                    "",
+                    "#### Retrieved Memory Context Preview",
+                    "",
+                    "~~~text",
+                    round_item.get("retrieved_context_preview", ""),
+                    "~~~",
                     "",
                     "#### Error Cause",
                     "",

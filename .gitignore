@@ -1,52 +1,46 @@
 # Python cache
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
 
-# Environment
-.env
+# Virtual environments
 .venv/
 venv/
 env/
-envs/
-.conda/
+ENV/
 
-# Runtime outputs
-workspaces/
-outputs/
-reports/
-error_logs/
-traces/
-uploaded/
-project/
-fixed_project_files/
-*.log
-
-# Test/demo data
-demo_inputs/
-demo_zip_project/
-demo_zip_project.zip
-demo_order_project/
-demo_order_project.zip
-demo_bank_project/
-demo_bank_project.zip
-benchmarks/
-QuixBugs/
+# Environment variables
+.env
 
 # IDE
 .vscode/
 .idea/
 
-# OS
+# OS files
 .DS_Store
 Thumbs.db
 
-# Large or generated files
-*.zip
-*.tar
-*.gz
+# Project runtime outputs
+workspaces/
+memory_store/
+memory/
 
-# Secrets
-*.key
-*.pem
+# Logs and reports
+*.log
+*.tmp
+
+# Test cache
+.pytest_cache/
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+
+# Node dependencies
+node_modules/
+
+# Chroma / vector db local files
+chroma_db/
+chromadb/

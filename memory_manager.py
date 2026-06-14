@@ -2,6 +2,8 @@ from pathlib import Path
 from datetime import datetime
 import json
 import os
+import re
+from typing import Any
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -11,12 +13,16 @@ LOCAL_MEMORY_PATH = MEMORY_DIR / "memory.json"
 
 class MemoryManager:
     """
-    Redis-first memory manager with local JSON fallback.
+    CodeFix Agent memory manager.
 
     Three memory layers:
     1. short_term: current task state
     2. episodic: historical repair cases
-    3. procedural: repair rules and skill routing experience
+    3. procedural: repair rules and routing experience
+
+    Backend:
+    - Redis first
+    - Local JSON fallback
     """
 
     def __init__(self, redis_url: str | None = None):
@@ -28,7 +34,14 @@ class MemoryManager:
         self._init_local_memory()
         self._try_connect_redis()
 
+    # =========================
+    # Backend initialization
+    # =========================
+
     def _try_connect_redis(self) -> None:
+        """
+        Try Redis first. If Redis is not available, use local JSON.
+        """
         try:
             import redis
 
@@ -42,6 +55,9 @@ class MemoryManager:
             self.backend = "json"
 
     def _init_local_memory(self) -> None:
+        """
+        Create local memory file if it does not exist.
+        """
         if not LOCAL_MEMORY_PATH.exists():
             data = {
                 "short_term": {},
@@ -62,6 +78,10 @@ class MemoryManager:
             json.dumps(data, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+    # =========================
+    # Short-term memory
+    # =========================
 
     def remember_short_term(self, task_id: str, state: dict) -> None:
         """
@@ -94,9 +114,25 @@ class MemoryManager:
         data = self._load_local_memory()
         return data["short_term"].get(task_id)
 
+    # =========================
+    # Episodic memory
+    # =========================
+
     def remember_episodic(self, case: dict) -> None:
         """
-        Save a historical repair case.
+        Save one historical repair case.
+
+        Example case:
+        {
+            "skill_name": "PythonTestFixSkill",
+            "language": "python",
+            "error_type": "AssertionError",
+            "user_requirement": "...",
+            "error_log_preview": "...",
+            "fix_summary": "...",
+            "success": True,
+            "diff_preview": "..."
+        }
         """
         payload = {
             "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -114,7 +150,7 @@ class MemoryManager:
 
     def list_episodic(self, limit: int = 10) -> list:
         """
-        List historical repair cases.
+        List recent historical repair cases.
         """
         if self.backend == "redis":
             key = "codefix:episodic"
@@ -123,6 +159,95 @@ class MemoryManager:
 
         data = self._load_local_memory()
         return data["episodic"][-limit:]
+
+    def search_episodic(self, query: str, top_k: int = 3) -> list[dict]:
+        """
+        Search similar historical repair cases.
+
+        This is a simple keyword-based memory search.
+        It is not ChromaDB yet, but it is enough to make memory participate
+        in the repair workflow.
+        """
+        query_tokens = self._tokenize(query)
+
+        if not query_tokens:
+            return []
+
+        memories = self.list_episodic(limit=200)
+        scored = []
+
+        for item in memories:
+            case = item.get("case", {})
+
+            memory_text = "\n".join(
+                [
+                    str(case.get("skill_name", "")),
+                    str(case.get("language", "")),
+                    str(case.get("error_type", "")),
+                    str(case.get("user_requirement", "")),
+                    str(case.get("error_log_preview", "")),
+                    str(case.get("fix_summary", "")),
+                    str(case.get("diff_preview", "")),
+                ]
+            )
+
+            memory_tokens = self._tokenize(memory_text)
+            score = len(query_tokens.intersection(memory_tokens))
+
+            if score > 0:
+                scored.append(
+                    {
+                        "score": score,
+                        "created_at": item.get("created_at", ""),
+                        "case": case,
+                    }
+                )
+
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        return scored[:top_k]
+
+    def build_retrieved_context(self, query: str, top_k: int = 3) -> str:
+        """
+        Build retrieved_context for LLM prompt.
+
+        This text will be passed into generate_patch(..., retrieved_context=...).
+        """
+        results = self.search_episodic(query=query, top_k=top_k)
+
+        if not results:
+            return ""
+
+        parts = [
+            "Historical repair memories found. Use them only if they are relevant.",
+            "Do not blindly copy old fixes. Current code and current test log are the main evidence.",
+            "",
+        ]
+
+        for index, item in enumerate(results, start=1):
+            case = item["case"]
+
+            parts.append(
+                f"""Memory {index}:
+- Score: {item["score"]}
+- Time: {item.get("created_at", "")}
+- Skill: {case.get("skill_name", "")}
+- Language: {case.get("language", "")}
+- Error Type: {case.get("error_type", "")}
+- Previous Requirement: {case.get("user_requirement", "")}
+- Previous Success: {case.get("success", "")}
+- Previous Fix Summary:
+{case.get("fix_summary", "")}
+
+- Previous Diff Preview:
+{case.get("diff_preview", "")}
+"""
+            )
+
+        return "\n".join(parts)
+
+    # =========================
+    # Procedural memory
+    # =========================
 
     def remember_procedural(self, rule_name: str, rule_value: dict) -> None:
         """
@@ -154,53 +279,49 @@ class MemoryManager:
         data = self._load_local_memory()
         return data["procedural"].get(rule_name)
 
+    # =========================
+    # Utilities
+    # =========================
+
     def describe_backend(self) -> str:
         return self.backend
 
+    def _tokenize(self, text: str) -> set[str]:
+        """
+        Simple tokenizer for English words, code tokens, and Chinese chunks.
+        """
+        return set(
+            re.findall(
+                r"[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[\u4e00-\u9fff]+",
+                text.lower(),
+            )
+        )
+
 
 def main():
-    print("=== Day 20 Memory Manager Test ===")
+    print("=== Memory Manager Test ===")
 
     memory = MemoryManager()
-
     print("memory backend:", memory.describe_backend())
-
-    task_id = "demo_task_001"
-
-    memory.remember_short_term(
-        task_id,
-        {
-            "language": "python",
-            "current_step": "generate_patch",
-            "error_type": "AssertionError",
-        },
-    )
 
     memory.remember_episodic(
         {
+            "skill_name": "PythonTestFixSkill",
             "language": "python",
             "error_type": "AssertionError",
-            "fix_summary": "Changed subtraction to addition.",
+            "user_requirement": "修复银行账户系统里的余额计算错误。",
+            "error_log_preview": "assert account.deposit, self.balance -= amount",
+            "fix_summary": "Changed deposit logic from subtraction to addition.",
             "success": True,
+            "diff_preview": "- self.balance -= amount\n+ self.balance += amount",
         }
     )
 
-    memory.remember_procedural(
-        "python_default_test_command",
-        {
-            "language": "python",
-            "command": "pytest",
-        },
-    )
+    query = "pytest AssertionError deposit self.balance -= amount"
+    context = memory.build_retrieved_context(query=query, top_k=3)
 
-    print("\nshort term:")
-    print(memory.get_short_term(task_id))
-
-    print("\nepisodic:")
-    print(memory.list_episodic(limit=3))
-
-    print("\nprocedural:")
-    print(memory.get_procedural("python_default_test_command"))
+    print("\nretrieved context:")
+    print(context)
 
     print("\nMemory manager test finished.")
 
