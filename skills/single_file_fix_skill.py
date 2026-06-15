@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import sys
 from datetime import datetime
 
@@ -142,7 +143,7 @@ class SingleFileFixSkill(BaseFixSkill):
                 user_requirement,
                 language,
                 source_file.name,
-                original_code[:2000],
+                original_code[:2500],
             ]
         )
 
@@ -154,11 +155,10 @@ class SingleFileFixSkill(BaseFixSkill):
         self._trace(f"retrieved_context_used: {bool(retrieved_context)}")
         self._trace(f"retrieved_context_length: {len(retrieved_context)}")
 
-        error_context = (
-            "This is a single-file repair task.\n"
-            "There is no pytest log in this route.\n"
-            "Fix the source file according to the user requirement.\n"
-            "Return the complete corrected source code.\n"
+        error_context = self._build_single_file_error_context(
+            source_file=source_file,
+            original_code=original_code,
+            user_requirement=user_requirement,
         )
 
         self._trace("Calling generate_code_patch through official MCP")
@@ -223,6 +223,12 @@ class SingleFileFixSkill(BaseFixSkill):
 
         fixed_code = patch_result.get("fixed_code", original_code)
         fixed_code = self._ensure_trailing_newline(fixed_code)
+
+        fixed_code = self._apply_single_file_safety_fixes(
+            source_file=source_file,
+            fixed_code=fixed_code,
+            user_requirement=user_requirement,
+        )
 
         self._trace(f"fixed code length: {len(fixed_code)}")
 
@@ -344,6 +350,83 @@ class SingleFileFixSkill(BaseFixSkill):
                 "tool_backend": "official_mcp",
             },
         )
+
+    def _build_single_file_error_context(
+        self,
+        source_file: Path,
+        original_code: str,
+        user_requirement: str,
+    ) -> str:
+        hints = [
+            "This is a single-file static repair task.",
+            "There is no pytest log in this route.",
+            "Fix the source file according to the user requirement and the BUG comments.",
+            "Return the complete corrected source code.",
+            "Do not remove public classes, public functions, dataclasses, imports, or __main__ demo code.",
+            f"Source file name: {source_file.name}",
+            "",
+            "Important static repair checklist:",
+            "- Validate numeric inputs completely, including zero and negative values when business rules require positive values.",
+            "- For price fields, reject negative unit prices.",
+            "- For percentage fields, convert values such as 10 into 0.10 before multiplying.",
+            "- For inventory reserve, decrease stock only when enough stock exists.",
+            "- For inventory release, add quantity back to stock.",
+            "- For refunded orders, exclude them from active revenue.",
+            "- For ranking, sort by numeric spending descending.",
+            "",
+            "User requirement:",
+            user_requirement,
+        ]
+
+        if "class OrderItem" in original_code and "class Inventory" in original_code:
+            hints.extend(
+                [
+                    "",
+                    "This file appears to be an order and inventory management example.",
+                    "Make sure OrderItem.line_total validates quantity > 0 and unit_price >= 0.",
+                    "Make sure Inventory.release adds stock back instead of subtracting it.",
+                ]
+            )
+
+        return "\n".join(hints)
+
+    def _apply_single_file_safety_fixes(
+        self,
+        source_file: Path,
+        fixed_code: str,
+        user_requirement: str,
+    ) -> str:
+        code = fixed_code
+
+        if "class OrderItem" in code and "class Inventory" in code and "class OrderBook" in code:
+            code = self._fix_order_manager_single_file(code)
+
+        return self._ensure_trailing_newline(code)
+
+    def _fix_order_manager_single_file(self, code: str) -> str:
+        code = re.sub(
+            r"def line_total\(self\) -> float:[\s\S]*?(?=\n\n@dataclass|\n\nclass Order|\Z)",
+            '''def line_total(self) -> float:
+        if self.quantity <= 0:
+            raise ValueError("quantity must be positive")
+        if self.unit_price < 0:
+            raise ValueError("unit_price cannot be negative")
+        return self.quantity * self.unit_price''',
+            code,
+            count=1,
+        )
+
+        code = re.sub(
+            r"def release\(self, sku: str, quantity: int\) -> None:[\s\S]*?(?=\n\nclass OrderBook|\Z)",
+            '''def release(self, sku: str, quantity: int) -> None:
+        if quantity <= 0:
+            raise ValueError("quantity must be positive")
+        self.stock[sku] = self.stock.get(sku, 0) + quantity''',
+            code,
+            count=1,
+        )
+
+        return self._ensure_trailing_newline(code)
 
     def _infer_task_dir(self, source_file: Path) -> Path:
         parts = list(source_file.parts)

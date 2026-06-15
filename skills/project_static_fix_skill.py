@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import zipfile
 from datetime import datetime
 
 
@@ -40,6 +41,8 @@ class ProjectStaticFixSkill(BaseFixSkill):
                     "report_path": "",
                     "trace_path": "",
                     "fixed_files": [],
+                    "fixed_file_path": "",
+                    "fixed_files_zip_path": "",
                     "diff": "",
                     "tool_backend": "official_mcp",
                 },
@@ -56,6 +59,8 @@ class ProjectStaticFixSkill(BaseFixSkill):
                     "report_path": "",
                     "trace_path": "",
                     "fixed_files": [],
+                    "fixed_file_path": "",
+                    "fixed_files_zip_path": "",
                     "diff": "",
                     "tool_backend": "official_mcp",
                 },
@@ -85,12 +90,14 @@ class ProjectStaticFixSkill(BaseFixSkill):
         self.trace_path = trace_dir / "project_static_fix_trace.txt"
         self.trace_path.write_text("", encoding="utf-8")
 
+        project_requirement = self._read_project_requirement(project_dir)
+
         self._trace("ProjectStaticFixSkill started")
         self._trace(f"task_id: {task_id}")
-        self._trace(f"task_dir: {task_dir}")
         self._trace(f"project_dir: {project_dir}")
-        self._trace(f"language: {language}")
+        self._trace(f"detected_language_from_router: {language}")
         self._trace(f"user_requirement: {user_requirement}")
+        self._trace(f"project_requirement_length: {len(project_requirement)}")
         self._trace(f"memory_backend: {self.memory.describe_backend()}")
         self._trace("tool_backend: official_mcp")
 
@@ -108,8 +115,7 @@ class ProjectStaticFixSkill(BaseFixSkill):
 
         source_files = self._select_source_files(
             project_dir=project_dir,
-            language=language,
-            max_files=5,
+            max_files=20,
         )
 
         self._trace(f"selected source files: {[str(p) for p in source_files]}")
@@ -122,22 +128,13 @@ class ProjectStaticFixSkill(BaseFixSkill):
                 project_path=str(project_dir),
                 language=language,
                 user_requirement=user_requirement,
+                project_requirement=project_requirement,
                 file_results=[],
                 success=False,
                 message=message,
             )
 
             report_path.write_text(report, encoding="utf-8")
-
-            self.memory.remember_short_term(
-                task_id,
-                {
-                    "skill_name": self.name,
-                    "stage": "failed",
-                    "reason": message,
-                    "tool_backend": "official_mcp",
-                },
-            )
 
             return SkillResult(
                 success=False,
@@ -149,6 +146,8 @@ class ProjectStaticFixSkill(BaseFixSkill):
                     "report_path": str(report_path),
                     "trace_path": str(self.trace_path),
                     "fixed_files": [],
+                    "fixed_file_path": "",
+                    "fixed_files_zip_path": "",
                     "diff": "",
                     "memory_backend": self.memory.describe_backend(),
                     "tool_backend": "official_mcp",
@@ -162,6 +161,9 @@ class ProjectStaticFixSkill(BaseFixSkill):
         for source_file in source_files:
             self._trace("=" * 80)
             self._trace(f"Repairing file: {source_file}")
+
+            detected_language = self._guess_language_from_suffix(source_file)
+            self._trace(f"file_language: {detected_language}")
 
             read_result = self.tools.call_tool(
                 "read_file",
@@ -179,6 +181,7 @@ class ProjectStaticFixSkill(BaseFixSkill):
                     {
                         "source_file": str(source_file),
                         "fixed_file": "",
+                        "language": detected_language,
                         "success": False,
                         "error": error_message,
                         "error_cause": "",
@@ -190,14 +193,14 @@ class ProjectStaticFixSkill(BaseFixSkill):
                 continue
 
             original_code = read_result.get("content", "")
-            detected_language = language or self._guess_language_from_suffix(source_file)
 
             memory_query = "\n".join(
                 [
                     user_requirement,
+                    project_requirement,
                     detected_language,
                     source_file.name,
-                    original_code[:2000],
+                    original_code[:2500],
                 ]
             )
 
@@ -209,12 +212,10 @@ class ProjectStaticFixSkill(BaseFixSkill):
             self._trace(f"retrieved_context_used: {bool(retrieved_context)}")
             self._trace(f"retrieved_context_length: {len(retrieved_context)}")
 
-            error_context = (
-                "This is a static project repair task.\n"
-                "There is no test command in this route.\n"
-                "Repair the source file according to the user requirement and code context.\n"
-                "Return the complete corrected source code.\n"
-                "Do not remove unrelated project logic.\n"
+            error_context = self._build_error_context(
+                project_requirement=project_requirement,
+                source_file=source_file,
+                detected_language=detected_language,
             )
 
             self._trace("Calling generate_code_patch through official MCP")
@@ -242,6 +243,7 @@ class ProjectStaticFixSkill(BaseFixSkill):
                     {
                         "source_file": str(source_file),
                         "fixed_file": "",
+                        "language": detected_language,
                         "success": False,
                         "error": error_message,
                         "error_cause": patch_result.get("error_cause", ""),
@@ -291,6 +293,7 @@ class ProjectStaticFixSkill(BaseFixSkill):
                     {
                         "source_file": str(source_file),
                         "fixed_file": "",
+                        "language": detected_language,
                         "success": False,
                         "error": error_message,
                         "error_cause": patch_result.get("error_cause", ""),
@@ -318,6 +321,7 @@ class ProjectStaticFixSkill(BaseFixSkill):
                     {
                         "source_file": str(source_file),
                         "fixed_file": str(fixed_file_path),
+                        "language": detected_language,
                         "success": False,
                         "error": error_message,
                         "error_cause": patch_result.get("error_cause", ""),
@@ -337,6 +341,7 @@ class ProjectStaticFixSkill(BaseFixSkill):
             file_result = {
                 "source_file": str(source_file),
                 "fixed_file": str(fixed_file_path),
+                "language": detected_language,
                 "success": True,
                 "error": "",
                 "error_cause": patch_result.get("error_cause", ""),
@@ -352,6 +357,7 @@ class ProjectStaticFixSkill(BaseFixSkill):
                     "skill_name": self.name,
                     "language": detected_language,
                     "user_requirement": user_requirement,
+                    "project_requirement": project_requirement[:2000],
                     "source_file_path": str(source_file),
                     "fix_summary": patch_result.get("fix_summary", ""),
                     "error_cause": patch_result.get("error_cause", ""),
@@ -376,6 +382,7 @@ class ProjectStaticFixSkill(BaseFixSkill):
             project_path=str(project_dir),
             language=language,
             user_requirement=user_requirement,
+            project_requirement=project_requirement,
             file_results=file_results,
             success=final_success,
             message=message,
@@ -396,6 +403,15 @@ class ProjectStaticFixSkill(BaseFixSkill):
 
         self._trace(f"report saved: {report_path}")
 
+        fixed_files_zip_path = ""
+
+        if fixed_files:
+            fixed_files_zip_path = self._package_fixed_files(
+                output_dir=output_dir,
+                fixed_files=fixed_files,
+            )
+            self._trace(f"fixed files zip saved: {fixed_files_zip_path}")
+
         self.memory.remember_short_term(
             task_id,
             {
@@ -406,6 +422,7 @@ class ProjectStaticFixSkill(BaseFixSkill):
                 "trace_path": str(self.trace_path),
                 "success": final_success,
                 "fixed_files": fixed_files,
+                "fixed_files_zip_path": fixed_files_zip_path,
                 "tool_backend": "official_mcp",
             },
         )
@@ -420,7 +437,8 @@ class ProjectStaticFixSkill(BaseFixSkill):
                 "report_path": str(report_path),
                 "trace_path": str(self.trace_path),
                 "fixed_files": fixed_files,
-                "fixed_file_path": fixed_files[0] if fixed_files else "",
+                "fixed_file_path": fixed_files_zip_path or (fixed_files[0] if fixed_files else ""),
+                "fixed_files_zip_path": fixed_files_zip_path,
                 "diff": "\n\n".join(all_diffs),
                 "memory_backend": self.memory.describe_backend(),
                 "tool_backend": "official_mcp",
@@ -440,13 +458,62 @@ class ProjectStaticFixSkill(BaseFixSkill):
 
         return project_dir
 
+    def _read_project_requirement(self, project_dir: Path) -> str:
+        candidate_names = [
+            "README_REQUIREMENT.md",
+            "REQUIREMENT.md",
+            "requirements.md",
+            "README.md",
+        ]
+
+        chunks = []
+
+        for name in candidate_names:
+            path = project_dir / name
+            if path.exists() and path.is_file():
+                try:
+                    chunks.append(path.read_text(encoding="utf-8", errors="ignore"))
+                except Exception:
+                    pass
+
+        return "\n\n".join(chunks)
+
+    def _build_error_context(
+        self,
+        project_requirement: str,
+        source_file: Path,
+        detected_language: str,
+    ) -> str:
+        return "\n".join(
+            [
+                "This is a static mixed-language project repair task.",
+                "There may be Python, Java, C, JavaScript, or TypeScript files in the same ZIP project.",
+                "Repair this file according to the project requirement and the comments inside the source code.",
+                "Return the complete corrected source code for this file only.",
+                "Do not remove public function names, class names, method names, or main functions.",
+                f"Current file: {source_file.name}",
+                f"Current file language: {detected_language}",
+                "",
+                "Project requirement:",
+                project_requirement,
+            ]
+        )
+
     def _select_source_files(
         self,
         project_dir: Path,
-        language: str,
-        max_files: int = 5,
+        max_files: int = 20,
     ) -> list[Path]:
-        suffixes = self._suffixes_for_language(language)
+        supported_suffixes = {
+            ".py",
+            ".java",
+            ".c",
+            ".h",
+            ".js",
+            ".jsx",
+            ".ts",
+            ".tsx",
+        }
 
         ignored_dirs = {
             ".git",
@@ -474,7 +541,7 @@ class ProjectStaticFixSkill(BaseFixSkill):
             if lower_parts.intersection(ignored_dirs):
                 continue
 
-            if path.suffix.lower() not in suffixes:
+            if path.suffix.lower() not in supported_suffixes:
                 continue
 
             lower_name = path.name.lower()
@@ -493,38 +560,25 @@ class ProjectStaticFixSkill(BaseFixSkill):
 
             selected.append(path)
 
-        selected.sort(key=lambda p: len(str(p)))
+        selected.sort(key=lambda p: (self._language_sort_key(p), str(p)))
 
         return selected[:max_files]
 
-    def _suffixes_for_language(self, language: str) -> set[str]:
-        language = (language or "").lower()
+    def _language_sort_key(self, source_file: Path) -> int:
+        suffix = source_file.suffix.lower()
 
-        if language == "python":
-            return {".py"}
-
-        if language == "java":
-            return {".java"}
-
-        if language == "c":
-            return {".c", ".h"}
-
-        if language in {"javascript", "js"}:
-            return {".js", ".jsx"}
-
-        if language in {"typescript", "ts"}:
-            return {".ts", ".tsx"}
-
-        return {
-            ".py",
-            ".java",
-            ".c",
-            ".h",
-            ".js",
-            ".jsx",
-            ".ts",
-            ".tsx",
+        order = {
+            ".py": 0,
+            ".java": 1,
+            ".c": 2,
+            ".h": 3,
+            ".js": 4,
+            ".jsx": 5,
+            ".ts": 6,
+            ".tsx": 7,
         }
+
+        return order.get(suffix, 99)
 
     def _guess_language_from_suffix(self, source_file: Path) -> str:
         suffix = source_file.suffix.lower()
@@ -559,12 +613,34 @@ class ProjectStaticFixSkill(BaseFixSkill):
         safe_name = str(relative_path).replace("\\", "_").replace("/", "_")
         return safe_name
 
+    def _package_fixed_files(
+        self,
+        output_dir: Path,
+        fixed_files: list[str],
+    ) -> str:
+        zip_path = output_dir / "fixed_project_files.zip"
+
+        if zip_path.exists():
+            zip_path.unlink()
+
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for file_path in fixed_files:
+                path = Path(file_path)
+
+                if not path.exists() or not path.is_file():
+                    continue
+
+                zf.write(path, arcname=path.name)
+
+        return str(zip_path)
+
     def _build_report(
         self,
         task_id: str,
         project_path: str,
         language: str,
         user_requirement: str,
+        project_requirement: str,
         file_results: list[dict],
         success: bool,
         message: str,
@@ -578,7 +654,7 @@ class ProjectStaticFixSkill(BaseFixSkill):
             "",
             f"- Task ID: {task_id}",
             f"- Project Path: {project_path}",
-            f"- Language: {language}",
+            f"- Router Language: {language}",
             f"- Success: {success}",
             f"- Memory Backend: {self.memory.describe_backend()}",
             f"- Tool Backend: official_mcp",
@@ -586,6 +662,10 @@ class ProjectStaticFixSkill(BaseFixSkill):
             "## User Requirement",
             "",
             user_requirement,
+            "",
+            "## Project Requirement",
+            "",
+            project_requirement,
             "",
             "## File Results",
             "",
@@ -598,6 +678,7 @@ class ProjectStaticFixSkill(BaseFixSkill):
                     "",
                     f"- Source File: {item.get('source_file', '')}",
                     f"- Fixed File: {item.get('fixed_file', '')}",
+                    f"- Language: {item.get('language', '')}",
                     f"- Success: {item.get('success', False)}",
                     f"- Retrieved Context Used: {item.get('retrieved_context_used', False)}",
                     f"- Error: {item.get('error', '')}",
@@ -645,7 +726,7 @@ def main():
     state = {
         "project_path": str(CODEFIX_DIR / "demo_static_project"),
         "user_requirement": "Fix obvious bugs in this project.",
-        "language": "python",
+        "language": "mixed",
     }
 
     result = skill.run(state)
