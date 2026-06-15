@@ -24,3 +24,5 @@ pydantic
 pytest
 
 redis
+
+mcp[cli]>=1.27,<2

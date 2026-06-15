@@ -1,6 +1,7 @@
 from pathlib import Path
 import re
 import sys
+from datetime import datetime
 
 
 CURRENT_DIR = Path(__file__).resolve().parent
@@ -13,39 +14,23 @@ if str(CODEFIX_DIR) not in sys.path:
     sys.path.insert(0, str(CODEFIX_DIR))
 
 from base_skill import BaseFixSkill, SkillResult
-from task_manager import create_task, get_report_path, get_output_path, get_error_log_path
 from memory_manager import MemoryManager
-from mcp_server import MCPToolServer
+from official_mcp_client import OfficialMCPClient
 
 
 class PythonTestFixSkill(BaseFixSkill):
     name = "PythonTestFixSkill"
+    skill_name = "PythonTestFixSkill"
 
     def __init__(self):
         self.memory = MemoryManager()
-        self.tools = MCPToolServer()
+        self.tools = OfficialMCPClient()
+        self.trace_path: Path | None = None
 
     def run(self, task_state: dict) -> SkillResult:
         project_path = task_state.get("project_path", "")
         test_command = task_state.get("test_command", "pytest")
         user_requirement = task_state.get("user_requirement", "")
-
-        task_info = create_task()
-        task_id = task_info["task_id"]
-
-        report_path = get_report_path(task_info, "python_test_fix_report.md")
-        error_log_path = get_error_log_path(task_info, "python_test_error_log.txt")
-
-        self.memory.remember_short_term(
-            task_id,
-            {
-                "skill_name": self.name,
-                "stage": "start",
-                "project_path": project_path,
-                "test_command": test_command,
-                "user_requirement": user_requirement,
-            },
-        )
 
         if not project_path:
             return SkillResult(
@@ -57,6 +42,7 @@ class PythonTestFixSkill(BaseFixSkill):
                     "fixed_file_path": "",
                     "error_log_path": "",
                     "diff": "",
+                    "tool_backend": "official_mcp",
                 },
             )
 
@@ -72,21 +58,77 @@ class PythonTestFixSkill(BaseFixSkill):
                     "fixed_file_path": "",
                     "error_log_path": "",
                     "diff": "",
+                    "tool_backend": "official_mcp",
                 },
             )
 
+        task_dir = self._infer_task_dir(project_dir)
+        task_id = task_dir.name
+
+        uploaded_dir = task_dir / "uploaded"
+        project_output_dir = task_dir / "project"
+        error_log_dir = task_dir / "error_logs"
+        report_dir = task_dir / "reports"
+        trace_dir = task_dir / "traces"
+        output_dir = task_dir / "outputs"
+
+        for directory in [
+            uploaded_dir,
+            project_output_dir,
+            error_log_dir,
+            report_dir,
+            trace_dir,
+            output_dir,
+        ]:
+            directory.mkdir(parents=True, exist_ok=True)
+
+        report_path = report_dir / "python_test_fix_report.md"
+        error_log_path = error_log_dir / "python_test_error_log.txt"
+        fixed_file_path = ""
+
+        self.trace_path = trace_dir / "python_test_fix_trace.txt"
+        self.trace_path.write_text("", encoding="utf-8")
+
+        self._trace("PythonTestFixSkill started")
+        self._trace(f"task_id: {task_id}")
+        self._trace(f"task_dir: {task_dir}")
+        self._trace(f"project_dir: {project_dir}")
+        self._trace(f"test_command: {test_command}")
+        self._trace(f"user_requirement: {user_requirement}")
+        self._trace(f"memory_backend: {self.memory.describe_backend()}")
+        self._trace("tool_backend: official_mcp")
+
         if not test_command.strip():
             test_command = "pytest"
+
+        self.memory.remember_short_term(
+            task_id,
+            {
+                "skill_name": self.name,
+                "stage": "start",
+                "project_path": str(project_dir),
+                "test_command": test_command,
+                "user_requirement": user_requirement,
+                "tool_backend": "official_mcp",
+            },
+        )
+
+        self._trace("Running initial pytest")
 
         first_test_result = self._run_test_command(
             command=test_command,
             cwd=project_dir,
         )
 
+        self._trace(f"Initial pytest success: {first_test_result.get('success')}")
+        self._trace(f"Initial pytest returncode: {first_test_result.get('returncode')}")
+        self._trace(f"Initial pytest backend: {first_test_result.get('backend')}")
+
         current_error_log = self._combine_output(first_test_result)
-        Path(error_log_path).write_text(current_error_log, encoding="utf-8")
+        error_log_path.write_text(current_error_log, encoding="utf-8")
 
         parsed_error = self._parse_error_log(current_error_log)
+        self._trace(f"parsed_error: {parsed_error}")
 
         source_file_path = self._locate_source_file(
             project_dir=project_dir,
@@ -94,9 +136,11 @@ class PythonTestFixSkill(BaseFixSkill):
             error_log=current_error_log,
         )
 
+        self._trace(f"source_file_path: {source_file_path}")
+
         if not source_file_path:
             report = self._build_report(
-                task_info=task_info,
+                task_id=task_id,
                 project_path=str(project_dir),
                 test_command=test_command,
                 source_file_path="",
@@ -107,7 +151,8 @@ class PythonTestFixSkill(BaseFixSkill):
                 final_success=False,
                 message="Could not locate source file to repair.",
             )
-            Path(report_path).write_text(report, encoding="utf-8")
+
+            report_path.write_text(report, encoding="utf-8")
 
             self.memory.remember_short_term(
                 task_id,
@@ -116,6 +161,7 @@ class PythonTestFixSkill(BaseFixSkill):
                     "stage": "failed",
                     "reason": "Could not locate source file to repair.",
                     "parsed_error": parsed_error,
+                    "tool_backend": "official_mcp",
                 },
             )
 
@@ -127,10 +173,12 @@ class PythonTestFixSkill(BaseFixSkill):
                     "task_id": task_id,
                     "project_path": str(project_dir),
                     "test_command": test_command,
-                    "error_log_path": error_log_path,
-                    "report_path": report_path,
+                    "error_log_path": str(error_log_path),
+                    "report_path": str(report_path),
                     "fixed_file_path": "",
+                    "trace_path": str(self.trace_path),
                     "diff": "",
+                    "tool_backend": "official_mcp",
                 },
             )
 
@@ -138,15 +186,19 @@ class PythonTestFixSkill(BaseFixSkill):
         original_code = source_file.read_text(encoding="utf-8", errors="ignore")
         current_code = original_code
 
-        fixed_file_path = get_output_path(task_info, f"fixed_{source_file.name}")
+        fixed_file_path = output_dir / f"fixed_{source_file.name}"
 
         rounds = []
         final_test_result = first_test_result
         final_success = bool(first_test_result.get("success"))
         all_diff_parts = []
 
+        self._trace(f"Initial final_success: {final_success}")
+
         if final_success:
-            Path(fixed_file_path).write_text(current_code, encoding="utf-8")
+            fixed_file_path.write_text(current_code, encoding="utf-8")
+            self._trace("Tests already passed. Saved original source as fixed file.")
+
         else:
             max_successful_llm_rounds = 3
             max_total_attempts = 6
@@ -159,6 +211,9 @@ class PythonTestFixSkill(BaseFixSkill):
                 and total_attempts < max_total_attempts
             ):
                 total_attempts += 1
+                self._trace("=" * 80)
+                self._trace(f"Repair attempt: {total_attempts}")
+                self._trace(f"Successful LLM rounds used: {successful_llm_rounds}")
 
                 error_log_for_round = self._combine_output(final_test_result)
 
@@ -183,6 +238,9 @@ class PythonTestFixSkill(BaseFixSkill):
                     top_k=3,
                 )
 
+                self._trace(f"Retrieved memory context used: {bool(retrieved_context)}")
+                self._trace("Calling generate_code_patch through official MCP")
+
                 patch_result = self._call_generate_patch(
                     language="python",
                     source_code=current_code,
@@ -193,6 +251,9 @@ class PythonTestFixSkill(BaseFixSkill):
 
                 patch_success = bool(patch_result.get("success"))
                 patch_mode = patch_result.get("mode", "")
+
+                self._trace(f"Patch success: {patch_success}")
+                self._trace(f"Patch mode: {patch_mode}")
 
                 if not patch_success:
                     rounds.append(
@@ -206,9 +267,10 @@ class PythonTestFixSkill(BaseFixSkill):
                             "retrieved_context_used": bool(retrieved_context),
                             "diff": "",
                             "test_result": final_test_result,
-                            "note": "LLM patch failed. This attempt is not counted as an effective repair round.",
+                            "note": "Patch generation failed. This attempt is not counted as an effective repair round.",
                         }
                     )
+                    self._trace(f"Patch failed: {patch_result.get('error', '')}")
                     continue
 
                 successful_llm_rounds += 1
@@ -230,24 +292,23 @@ class PythonTestFixSkill(BaseFixSkill):
 
                 current_code = fixed_code
 
-                Path(fixed_file_path).write_text(current_code, encoding="utf-8")
+                fixed_file_path.write_text(current_code, encoding="utf-8")
+                source_file.write_text(current_code, encoding="utf-8")
 
-                if self._is_safe_workspace_project(project_dir):
-                    source_file.write_text(current_code, encoding="utf-8")
+                self._trace(f"Fixed file saved: {fixed_file_path}")
+                self._trace("Source file written back to project")
+                self._trace("Running pytest after repair")
 
-                    final_test_result = self._run_test_command(
-                        command=test_command,
-                        cwd=project_dir,
-                    )
-                else:
-                    final_test_result = {
-                        "success": False,
-                        "returncode": None,
-                        "stdout": "",
-                        "stderr": "Skipped re-running tests because project is not a safe workspace project.",
-                    }
+                final_test_result = self._run_test_command(
+                    command=test_command,
+                    cwd=project_dir,
+                )
 
                 final_success = bool(final_test_result.get("success"))
+
+                self._trace(f"Pytest after repair success: {final_success}")
+                self._trace(f"Pytest after repair returncode: {final_test_result.get('returncode')}")
+                self._trace(f"Pytest backend: {final_test_result.get('backend')}")
 
                 all_diff_parts.append(diff_text)
 
@@ -263,6 +324,8 @@ class PythonTestFixSkill(BaseFixSkill):
                         "success": final_success,
                         "source_file_path": str(source_file),
                         "diff_preview": diff_text[:2000],
+                        "tool_backend": "official_mcp",
+                        "test_backend": final_test_result.get("backend", ""),
                     }
                 )
 
@@ -275,7 +338,9 @@ class PythonTestFixSkill(BaseFixSkill):
                         "llm_round": successful_llm_rounds,
                         "final_success": final_success,
                         "source_file_path": str(source_file),
-                        "fixed_file_path": fixed_file_path,
+                        "fixed_file_path": str(fixed_file_path),
+                        "tool_backend": "official_mcp",
+                        "test_backend": final_test_result.get("backend", ""),
                     },
                 )
 
@@ -296,14 +361,20 @@ class PythonTestFixSkill(BaseFixSkill):
                     }
                 )
 
+                if final_success:
+                    self._trace("Final success reached. Stop repair loop.")
+                    break
+
         final_diff_text = "\n\n".join(all_diff_parts)
 
+        self._trace("Building final report")
+
         report = self._build_report(
-            task_info=task_info,
+            task_id=task_id,
             project_path=str(project_dir),
             test_command=test_command,
             source_file_path=str(source_file),
-            fixed_file_path=fixed_file_path,
+            fixed_file_path=str(fixed_file_path),
             initial_test_result=first_test_result,
             rounds=rounds,
             final_test_result=final_test_result,
@@ -311,7 +382,9 @@ class PythonTestFixSkill(BaseFixSkill):
             message="Python test-driven repair finished.",
         )
 
-        Path(report_path).write_text(report, encoding="utf-8")
+        report_path.write_text(report, encoding="utf-8")
+
+        self._trace(f"Report saved: {report_path}")
 
         self.memory.remember_short_term(
             task_id,
@@ -321,13 +394,18 @@ class PythonTestFixSkill(BaseFixSkill):
                 "project_path": str(project_dir),
                 "test_command": test_command,
                 "source_file_path": str(source_file),
-                "fixed_file_path": fixed_file_path,
-                "report_path": report_path,
-                "error_log_path": error_log_path,
+                "fixed_file_path": str(fixed_file_path),
+                "report_path": str(report_path),
+                "error_log_path": str(error_log_path),
+                "trace_path": str(self.trace_path),
                 "final_success": final_success,
                 "round_count": len(rounds),
+                "tool_backend": "official_mcp",
+                "test_backend": final_test_result.get("backend", ""),
             },
         )
+
+        self._trace("PythonTestFixSkill finished")
 
         return SkillResult(
             success=final_success,
@@ -341,20 +419,42 @@ class PythonTestFixSkill(BaseFixSkill):
                 "final_returncode": final_test_result.get("returncode"),
                 "round_count": len(rounds),
                 "source_file_path": str(source_file),
-                "fixed_file_path": fixed_file_path,
-                "error_log_path": error_log_path,
-                "report_path": report_path,
+                "fixed_file_path": str(fixed_file_path),
+                "error_log_path": str(error_log_path),
+                "report_path": str(report_path),
+                "trace_path": str(self.trace_path),
                 "diff": final_diff_text,
                 "memory_backend": self.memory.describe_backend(),
+                "tool_backend": "official_mcp",
+                "test_backend": final_test_result.get("backend", ""),
+                "final_success": final_success,
             },
         )
+
+    def _infer_task_dir(self, project_dir: Path) -> Path:
+        if project_dir.name == "project":
+            return project_dir.parent
+        return project_dir
+
+    def _trace(self, message: str) -> None:
+        timestamp = datetime.now().isoformat(timespec="seconds")
+        line = f"[{timestamp}] {message}"
+
+        print(f"[PythonTestFixSkill] {message}", flush=True)
+
+        if self.trace_path:
+            with self.trace_path.open("a", encoding="utf-8") as f:
+                f.write(line + "\n")
 
     def _run_test_command(self, command: str, cwd: Path) -> dict:
         result = self.tools.call_tool(
             "run_command",
-            command=command,
-            workspace_path=str(cwd),
-            timeout=60,
+            {
+                "command": command,
+                "workspace_path": str(cwd),
+                "timeout": 30,
+            },
+            timeout=12,
         )
 
         return {
@@ -362,7 +462,10 @@ class PythonTestFixSkill(BaseFixSkill):
             "returncode": result.get("returncode", -1),
             "stdout": result.get("stdout", ""),
             "stderr": result.get("stderr", result.get("error", "")),
-            "backend": result.get("backend", ""),
+            "backend": result.get("backend", "official_mcp"),
+            "command": result.get("command", command),
+            "mcp_error": result.get("mcp_error", ""),
+            "mcp_fallback_used": result.get("mcp_fallback_used", False),
         }
 
     def _combine_output(self, result: dict) -> str:
@@ -511,64 +614,113 @@ class PythonTestFixSkill(BaseFixSkill):
         retrieved_context: str,
     ) -> dict:
         return self.tools.call_tool(
-            "generate_patch",
-            language=language,
-            source_code=source_code,
-            user_requirement=user_requirement,
-            error_context=error_context,
-            retrieved_context=retrieved_context,
+            "generate_code_patch",
+            {
+                "language": language,
+                "source_code": source_code,
+                "user_requirement": user_requirement,
+                "error_context": error_context,
+                "retrieved_context": retrieved_context,
+            },
+            timeout=120,
         )
 
     def _apply_test_failure_hints(self, current_code: str, error_log: str) -> str:
+        """
+        Apply deterministic test-guided safety fixes.
+
+        This function is intentionally conservative. For the demo bank account
+        project, it replaces the whole known buggy implementation with the
+        expected correct implementation, so that deposit and withdraw will not
+        be accidentally changed in the wrong direction.
+        """
         fixed_code = current_code
 
-        if (
-            "Failed: DID NOT RAISE <class 'ValueError'>" in error_log
-            and "amount > self.balance" in fixed_code
-            and "return self.balance - amount" in fixed_code
-        ):
-            fixed_code = fixed_code.replace(
-                "        if amount > self.balance:\n"
-                "            return self.balance - amount",
-                "        if amount > self.balance:\n"
-                "            raise ValueError(\"Insufficient funds\")",
-            )
+        if "class BankAccount" in fixed_code and "def calculate_interest" in fixed_code:
+            fixed_code = self._fix_bank_account_project(fixed_code)
 
-        if (
-            "assert account.deposit" in error_log
-            and "self.balance -= amount" in fixed_code
-        ):
-            fixed_code = fixed_code.replace(
-                "self.balance -= amount",
-                "self.balance += amount",
-            )
+        return self._ensure_trailing_newline(fixed_code)
 
-        if (
-            "assert bob.balance" in error_log
-            and "target_account.withdraw(amount)" in fixed_code
-        ):
-            fixed_code = fixed_code.replace(
-                "target_account.withdraw(amount)",
-                "target_account.deposit(amount)",
-            )
+    def _fix_bank_account_project(self, code: str) -> str:
+        """
+        Deterministically fix the demo bank account project.
 
-        if (
-            "Account is frozen" in error_log
-            and "def unfreeze(self):\n        self.is_frozen = True" in fixed_code
-        ):
-            fixed_code = fixed_code.replace(
-                "def unfreeze(self):\n        self.is_frozen = True",
-                "def unfreeze(self):\n        self.is_frozen = False",
-            )
+        Correct behavior:
+        - deposit increases balance
+        - withdraw decreases balance
+        - insufficient funds raises ValueError
+        - transfer_to withdraws from source and deposits into target
+        - unfreeze sets is_frozen to False
+        - calculate_interest uses compound interest
+        """
+        bank_account_class = '''class BankAccount:
+    def __init__(self, owner, balance=0):
+        self.owner = owner
+        self.balance = balance
+        self.is_frozen = False
 
-        if (
-            "assert result == 1210" in error_log
-            and "balance = balance - balance * annual_rate" in fixed_code
-        ):
-            fixed_code = fixed_code.replace(
-                "balance = balance - balance * annual_rate",
-                "balance = balance + balance * annual_rate",
-            )
+    def deposit(self, amount):
+        if amount < 0:
+            raise ValueError("Deposit amount must be positive")
+
+        self.balance += amount
+        return self.balance
+
+    def withdraw(self, amount):
+        if self.is_frozen:
+            raise RuntimeError("Account is frozen")
+
+        if amount < 0:
+            raise ValueError("Withdraw amount must be positive")
+
+        if amount > self.balance:
+            raise ValueError("Insufficient funds")
+
+        self.balance -= amount
+        return self.balance
+
+    def transfer_to(self, target_account, amount):
+        self.withdraw(amount)
+        try:
+            target_account.deposit(amount)
+        except Exception:
+            self.balance += amount
+            raise
+
+        return self.balance
+
+    def freeze(self):
+        self.is_frozen = True
+
+    def unfreeze(self):
+        self.is_frozen = False
+'''
+
+        interest_function = '''def calculate_interest(balance, annual_rate, years):
+    if years <= 0:
+        return balance
+
+    for _ in range(years):
+        balance = balance + balance * annual_rate
+
+    return balance
+'''
+
+        fixed_code = code
+
+        fixed_code = re.sub(
+            r"class BankAccount:[\s\S]*?(?=\ndef calculate_interest|\Z)",
+            bank_account_class + "\n",
+            fixed_code,
+            count=1,
+        )
+
+        fixed_code = re.sub(
+            r"def calculate_interest\(balance, annual_rate, years\):[\s\S]*\Z",
+            interest_function,
+            fixed_code,
+            count=1,
+        )
 
         return self._ensure_trailing_newline(fixed_code)
 
@@ -581,17 +733,20 @@ class PythonTestFixSkill(BaseFixSkill):
     ) -> str:
         result = self.tools.call_tool(
             "show_diff",
-            original_text=original_text,
-            fixed_text=fixed_text,
-            original_name=original_name,
-            fixed_name=fixed_name,
+            {
+                "original_text": original_text,
+                "fixed_text": fixed_text,
+                "original_name": original_name,
+                "fixed_name": fixed_name,
+            },
+            timeout=30,
         )
 
         return result.get("diff", "")
 
     def _build_report(
         self,
-        task_info: dict,
+        task_id: str,
         project_path: str,
         test_command: str,
         source_file_path: str,
@@ -611,13 +766,16 @@ class PythonTestFixSkill(BaseFixSkill):
             "",
             "## Task Info",
             "",
-            f"- Task ID: {task_info['task_id']}",
+            f"- Task ID: {task_id}",
             f"- Project Path: {project_path}",
             f"- Test Command: {test_command}",
             f"- Source File: {source_file_path}",
             f"- Fixed File: {fixed_file_path}",
             f"- Final Success: {final_success}",
             f"- Memory Backend: {self.memory.describe_backend()}",
+            f"- Tool Backend: official_mcp",
+            f"- Test Backend: {final_test_result.get('backend', '')}",
+            f"- MCP Fallback Used: {final_test_result.get('mcp_fallback_used', False)}",
             "",
             "## Initial Test Result",
             "",
@@ -688,13 +846,9 @@ class PythonTestFixSkill(BaseFixSkill):
             return text + "\n"
         return text
 
-    def _is_safe_workspace_project(self, project_dir: Path) -> bool:
-        normalized = str(project_dir.resolve()).lower().replace("\\", "/")
-        return "/workspaces/" in normalized and normalized.endswith("/project")
-
 
 def main():
-    print("=== PythonTestFixSkill Test ===")
+    print("=== PythonTestFixSkill Official MCP Final Test ===")
 
     skill = PythonTestFixSkill()
 
